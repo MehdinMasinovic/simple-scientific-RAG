@@ -51,7 +51,8 @@ Make sure you have Git, Python 3.12+ and Docker installed on your machine.
    Pull the required model llama3.2 by running:
 
    ```bash
-   docker exec ollama ollama run llama3.2
+   docker exec ollama ollama run llama3-chatqa:8b
+   docker exec ollama ollama run gemma3:12b   
    ```
 
 7. **Install model for chunking**
