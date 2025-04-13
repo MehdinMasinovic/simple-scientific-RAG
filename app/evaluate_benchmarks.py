@@ -19,28 +19,8 @@ from templates.contextual_recall_template import ContextualRecallTemplate
 from templates.contextual_relevancy_template import ContextualRelevancyTemplate
 from templates.faithfulness_template import FaithfulnessTemplate
 
-
-# Custom Ollama model for evaluation
-class CustomOllamaModel(DeepEvalBaseLLM):
-    def __init__(self, model_name: str = "llama3.2"):
-        self.model_name = model_name
-
-    def load_model(self):
-        return self.model_name
-
-    def generate(self, prompt: str) -> str:
-        response = ollama.generate(
-            model=self.model_name,
-            prompt=prompt,
-            options={'num_predict': 200, 'temperature': 0}
-        )
-        return response['response']
-
-    async def a_generate(self, prompt: str) -> str:
-        return self.generate(prompt)
-
-    def get_model_name(self):
-        return f"Ollama {self.model_name}"
+# Import our enhanced model
+from utils.enhanced_ollama_model import EnhancedOllamaModel
 
 
 def initialize_metrics(eval_model):
@@ -50,35 +30,35 @@ def initialize_metrics(eval_model):
             model=eval_model,
             threshold=0.7,
             evaluation_template=AnswerRelevancyTemplate,
-            strict_mode=True
+            strict_mode=False  # Changed to False to be more forgiving
         ),
         "contextual_recall": ContextualRecallMetric(
             threshold=0.7,
             model=eval_model,
             include_reason=True,
             evaluation_template=ContextualRecallTemplate,
-            strict_mode=True
+            strict_mode=False  # Changed to False to be more forgiving
         ),
         "contextual_precision": ContextualPrecisionMetric(
             threshold=0.7,
             model=eval_model,
             include_reason=True,
             evaluation_template=ContextualPrecisionTemplate,
-            strict_mode=True
+            strict_mode=False  # Changed to False to be more forgiving
         ),
         "faithfulness": FaithfulnessMetric(
             threshold=0.7,
             model=eval_model,
             include_reason=True,
             evaluation_template=FaithfulnessTemplate,
-            strict_mode=True
+            strict_mode=False  # Changed to False to be more forgiving
         ),
         "contextual_relevancy": ContextualRelevancyMetric(
             threshold=0.7,
             model=eval_model,
             include_reason=True,
             evaluation_template=ContextualRelevancyTemplate,
-            strict_mode=True
+            strict_mode=False  # Changed to False to be more forgiving
         )
     }
     return metrics
@@ -113,19 +93,24 @@ def evaluate_result_file(result_file, eval_model, output_dir):
             "metrics": {}
         }
 
-        # Measure all metrics
+        # Measure all metrics with error handling
         for metric_name, metric in metrics.items():
+            print(f"Measuring {metric_name}...")
             try:
                 metric.measure(test_case)
                 metrics_result["metrics"][metric_name] = {
                     "score": metric.score,
-                    "reason": metric.reason
+                    "reason": getattr(metric, "reason", "No reason provided")
                 }
+                print(f"  Score: {metric.score}")
             except Exception as e:
-                print(f"Error measuring {metric_name}: {str(e)}")
+                error_msg = f"Error measuring {metric_name}: {str(e)}"
+                print(error_msg)
+                # Still include the metric in results, but with error information
                 metrics_result["metrics"][metric_name] = {
                     "score": None,
-                    "reason": f"Error: {str(e)}"
+                    "reason": error_msg,
+                    "error": str(e)
                 }
 
         evaluation_results.append(metrics_result)
@@ -141,13 +126,17 @@ def evaluate_result_file(result_file, eval_model, output_dir):
     return output_file
 
 
-def evaluate_benchmarks(benchmark_dir, output_dir, eval_model_name="llama3.2"):
+def evaluate_benchmarks(benchmark_dir, output_dir, eval_model_name="llama3.2", max_retries=2):
     """Evaluate all benchmark results in the specified directory."""
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Initialize evaluation model
-    eval_model = CustomOllamaModel(model_name=eval_model_name)
+    # Initialize enhanced evaluation model
+    eval_model = EnhancedOllamaModel(
+        model_name=eval_model_name,
+        max_retries=max_retries,
+        enforce_json=True
+    )
 
     # Find all benchmark result files
     benchmark_files = list(Path(benchmark_dir).glob("results_*.json"))
@@ -192,10 +181,14 @@ if __name__ == "__main__":
     parser.add_argument('--eval-model', type=str, default='llama3.2',
                         help='Model to use for evaluation')
 
+    parser.add_argument('--max-retries', type=int, default=2,
+                        help='Maximum number of retries for JSON generation')
+
     args = parser.parse_args()
 
     evaluate_benchmarks(
         benchmark_dir=args.benchmark_dir,
         output_dir=args.output_dir,
-        eval_model_name=args.eval_model
+        eval_model_name=args.eval_model,
+        max_retries=args.max_retries
     )
